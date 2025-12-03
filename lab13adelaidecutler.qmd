@@ -1,0 +1,163 @@
+---
+title: "lab 13"
+author: "Adelaide Cutler"
+format:
+  html:
+    toc: true
+    code-fold: true
+    theme: cerulean
+    embed-resources: true
+    backgroundcolor: "pink"
+execute:
+  echo: true
+  freeze: auto
+---
+```{r}
+.libPaths(c("/home/ascutler_umass_edu/R/x86_64-pc-linux-gnu-library/4.5", "/usr/local/lib/R/site-library", "/usr/local/lib/R/library"))
+```
+
+```{r}
+library(tidyverse)
+library(janitor)
+library(plotly)
+library(DT)
+library(lubridate)
+```
+# Step 1: Overall Data
+```{r}
+NEON_soilMAGs_soilChem <- read.csv("NEON_soilMAGs_soilChem.csv")
+head(NEON_soilMAGs_soilChem)
+```
+# Step 2: Taxa distributions 
+For lab today I will be going over Bio-geography & Spatial Patterns within the above data set.
+These patterns look at the location in relationships with patterns. The below is mapped taxa distributions, which is the mapped abundance of different taxa in the data at certain locations.
+```{r}
+ggplot(NEON_soilMAGs_soilChem, aes(x = decimalLongitude, y = decimalLatitude, color = phylum)) +
+  geom_point(size = 3, alpha = 0.7) +
+  labs(title = "Taxa distribution of MAGs",
+       x = "Longitude", y = "Latitude") +
+  theme_minimal()
+```
+Above is a spatial map of taxa by longitude and latitue and colored by type.
+
+```{r}
+taxa_by_site <- NEON_soilMAGs_soilChem %>%
+  group_by(site_ID, phylum, decimalLatitude, decimalLongitude) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  group_by(site_ID) %>%
+  mutate(rel_abundance = count / sum(count))
+
+ggplot(taxa_by_site, aes(x = decimalLongitude, y = decimalLatitude, size = rel_abundance, color = phylum)) +
+  geom_point(alpha = 0.7) +
+  labs(title = "Relative abundance of taxa by site") +
+  theme_minimal()
+
+```
+This map is of abundance per site of each phylum.
+
+```{r}
+library(maps)
+
+world <- map_data("world")
+
+ggplot() +
+  geom_polygon(data = world, aes(x = long, y = lat, group = group),
+               fill = "gray90", color = "gray70") +
+  geom_point(data = NEON_soilMAGs_soilChem, aes(x = decimalLongitude, y = decimalLatitude, color = phylum),
+             size = 3, alpha = 0.7) +
+  coord_fixed(1.3) +
+  labs(title = "Taxa distribution of MAGs") +
+  theme_minimal()
+
+```
+This map shows the abundance on a real map of the world so theres a better idea of where everything is located for the reader.
+
+# Step 3: Spatial autocorrelation
+This will look to see if geography is associated to phylum communities.
+```{r}
+coords <- NEON_soilMAGs_soilChem %>%
+  select(decimalLongitude, decimalLatitude) %>%
+  filter(!is.na(decimalLongitude), !is.na(decimalLatitude))
+mags_clean <- NEON_soilMAGs_soilChem %>%
+  filter(!is.na(decimalLongitude), !is.na(decimalLatitude))
+
+coords <- mags_clean %>% select(decimalLongitude, decimalLatitude)
+
+library(spdep)
+
+neighbors <- knearneigh(coords, k = 4)
+nb <- knn2nb(neighbors)
+listw <- nb2listw(nb)
+
+```
+The code above will define what counts as neighbors spatialy.
+```{r}
+mags_clean <- NEON_soilMAGs_soilChem %>% filter(!is.na(soilInWaterpH))
+moran.test(mags_clean$soilInWaterpH, listw)
+```
+This result is a strong correlation meaning similar pH soil values tend to be near each other. This could mean the clustering shows there is an environmental reason behind the clusterings.
+
+# Step 4: Distance-decay analysis
+This will look at how the similarity of communities decreases as distance increases.
+```{r}
+comm_matrix <- NEON_soilMAGs_soilChem %>%
+  group_by(site_ID, phylum) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = phylum, values_from = count, values_fill = 0)
+
+# Extract coordinates
+coords <- NEON_soilMAGs_soilChem %>%
+  distinct(site_ID, decimalLatitude, decimalLongitude) %>%
+  arrange(site_ID)
+
+```
+```{r}
+library(vegan)
+
+# Remove siteID column to get numeric matrix
+dist_comm <- vegdist(comm_matrix[,-1], method = "bray")
+```
+The above code will Bray–Curtis dissimilarity, which is a statistical measure of dissimilarity.
+```{r}
+dist_geo <- dist(coords[,c("decimalLongitude","decimalLatitude")])
+```
+The above shows the distance between sites.
+```{r}
+comm_matrix <- NEON_soilMAGs_soilChem %>%
+  group_by(site_ID, phylum) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = phylum, values_from = count, values_fill = 0)
+coords <- NEON_soilMAGs_soilChem %>%
+  distinct(site_ID, decimalLatitude, decimalLongitude) %>%
+  arrange(site_ID)
+site_data <- comm_matrix %>%
+  inner_join(coords, by = "site_ID")
+nrow(comm_matrix)
+nrow(coords)
+nrow(site_data)
+
+site_data_clean <- na.omit(site_data)
+colSums(is.na(site_data_clean))
+```
+```{r}
+library(vegan)
+comm_matrix <- site_data_clean %>%
+  select(-site_ID, -decimalLatitude, -decimalLongitude)
+dist_comm <- vegdist(comm_matrix, method = "bray")
+coords <- site_data_clean %>% select(decimalLongitude, decimalLatitude)
+dist_geo <- dist(coords)
+mantel(dist_comm, dist_geo, method = "pearson")
+```
+The above results for mantel show a moderately positive correlation between dissimilarity and distance with 0.4057 = r. The significance of p = 0.001 shows a high significance meaning the null hypothesis can be rejected and there is a correlation. Overall these results prove there is a relationship between geographical distance and dissimilarity.
+
+
+
+
+
+
+
+
+
+
+
+
